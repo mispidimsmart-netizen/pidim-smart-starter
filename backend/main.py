@@ -4,11 +4,12 @@ from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd, requests, time
 from io import BytesIO, StringIO
 from typing import Dict, Any
+from calendar import month_name
 
 SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRkcagLu_YrYgQxmsO3DnHn90kqALkw9uDByX7UBNRUjaFKKQdE3V-6fm5ZcKGk_A/pub?gid=2143275417&single=true&output=csv"
-CACHE_TTL = 60 * 5
+CACHE_TTL = 60 * 5  # 5 minutes
 
-app = FastAPI(title="PIDIM SMART Reports API", version="0.1.0")
+app = FastAPI(title="PIDIM SMART Reports API", version="0.2.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 _cache: Dict[str, Any] = {}
@@ -48,32 +49,81 @@ def _pos(col: str) -> int:
         v = v * 26 + (ord(ch) - 64)
     return v
 
-BRANCH = _pos("G"); LOAN_TYPE = _pos("AN"); LOAN_AMOUNT = _pos("AQ"); POULTRY_TYPE = _pos("T"); BIRDS_COL = _pos("U"); GRANTS = _pos("BL")
+# Column positions (1-based like Excel)
+BRANCH = _pos("G")
+LOAN_TYPE = _pos("AN")
+LOAN_AMOUNT = _pos("AQ")
+POULTRY_TYPE = _pos("T")
+BIRDS_COL = _pos("U")
+GRANTS = _pos("BL")
+DATE_DISB = _pos("AP")  # Date of Disbursement
 
-def compute_loan(df: pd.DataFrame) -> pd.DataFrame:
-    b = _col_by_pos(df, BRANCH); t = _col_by_pos(df, LOAN_TYPE); a = _col_by_pos(df, LOAN_AMOUNT)
-    w = df[[b, t, a]].copy(); w[b] = _clean_branch(w[b]); w[t] = w[t].astype(str).str.strip()
+def compute_loan(df: pd.DataFrame, month_ym: str | None = None) -> pd.DataFrame:
+    b = _col_by_pos(df, BRANCH)
+    t = _col_by_pos(df, LOAN_TYPE)
+    a = _col_by_pos(df, LOAN_AMOUNT)
+    dcol = _col_by_pos(df, DATE_DISB)
+
+    w = df[[b, t, a, dcol]].copy()
+    w[b] = _clean_branch(w[b])
+    w[t] = w[t].astype(str).str.strip()
     w["_amt"] = pd.to_numeric(w[a], errors="coerce").fillna(0)
+
+    # Monthly filter: YYYY-MM
+    if month_ym:
+        w["_date"] = pd.to_datetime(w[dcol], errors="coerce", dayfirst=True, infer_datetime_format=True)
+        y, m = month_ym.split("-")
+        y, m = int(y), int(m)
+        w = w[(w["_date"].dt.year == y) & (w["_date"].dt.month == m)]
+
     def norm(x: str) -> str:
         x = (x or "").strip().lower()
         if "non" in x and "enterprise" in x: return "Non-Enterprise"
         if "enterprise" in x: return "Enterprise"
         return ""
-    w["_type"] = w[t].apply(norm); w = w[w[b].notna()]
-    g = (w.groupby([b, "_type"]).agg(**{"# of Loan":("_type","count"), "Amount of Loan":("_amt","sum")})
-         .reset_index().rename(columns={b:"Branch Name","_type":"Types of Loan"}))
-    order = {"Enterprise":0,"Non-Enterprise":1}; g["_o"]=g["Types of Loan"].map(order).fillna(99).astype(int)
+
+    w["_type"] = w[t].apply(norm)
+    w = w[w[b].notna()]
+
+    g = (
+        w.groupby([b, "_type"])
+         .agg(**{"# of Loan":("_type","count"), "Amount of Loan":("_amt","sum")})
+         .reset_index()
+         .rename(columns={b:"Branch Name","_type":"Types of Loan"})
+    )
+
+    order = {"Enterprise":0,"Non-Enterprise":1}
+    g["_o"] = g["Types of Loan"].map(order).fillna(99).astype(int)
+
     rows = []
     for br, gg in g.sort_values(["Branch Name","_o"]).groupby("Branch Name", sort=False):
         for _, r in gg.iterrows():
-            rows.append({"Branch Name":br,"Types of Loan":r["Types of Loan"],"# of Loan":int(r["# of Loan"]),"Amount of Loan":float(r["Amount of Loan"] or 0)})
-        rows.append({"Branch Name":f"{br} Total","Types of Loan":"","# of Loan":int(gg["# of Loan"].sum()),"Amount of Loan":float(gg["Amount of Loan"].sum())})
+            rows.append({
+                "Branch Name": br,
+                "Types of Loan": r["Types of Loan"],
+                "# of Loan": int(r["# of Loan"]),
+                "Amount of Loan": float(r["Amount of Loan"] or 0),
+            })
+        rows.append({
+            "Branch Name": f"{br} Total",
+            "Types of Loan": "",
+            "# of Loan": int(gg["# of Loan"].sum()),
+            "Amount of Loan": float(gg["Amount of Loan"].sum()),
+        })
+
     if rows:
         tmp = pd.DataFrame(rows)
-        rows.append({"Branch Name":"Grand Total","Types of Loan":"","# of Loan":int(tmp[tmp["Types of Loan"]!=""]["# of Loan"].sum()),"Amount of Loan":float(tmp[tmp["Types of Loan"]!=""]["Amount of Loan"].sum())})
+        rows.append({
+            "Branch Name": "Grand Total",
+            "Types of Loan": "",
+            "# of Loan": int(tmp[tmp["Types of Loan"]!=""]["# of Loan"].sum()),
+            "Amount of Loan": float(tmp[tmp["Types of Loan"]!=""]["Amount of Loan"].sum()),
+        })
+
     loan = pd.DataFrame(rows)
-    bad = loan["Branch Name"].astype(str).str.strip().str.lower().isin(["branch name","nan","nan total"])
-    loan = loan[~bad].copy()
+    if not loan.empty:
+        bad = loan["Branch Name"].astype(str).str.strip().str.lower().isin(["branch name","nan","nan total"])
+        loan = loan[~bad].copy()
     return _ensure_slno(loan)
 
 def compute_poultry(df: pd.DataFrame) -> pd.DataFrame:
@@ -133,12 +183,25 @@ def fixed_reports():
     except Exception as e:
         raise HTTPException(500, str(e))
 
+@app.get("/reports/loan")
+def loan_report(month: str | None = None):
+    try:
+        df = _get_cached_df()
+        rows = compute_loan(df, month_ym=month)
+        month_label = ""
+        if month:
+            y, m = month.split("-")
+            month_label = f"{month_name[int(m)]} {y}"
+        return {"month": month, "month_label": month_label, "rows": rows.to_dict(orient="records")}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
 @app.get("/export/excel")
 def export_excel():
     try:
         df = _get_cached_df()
         data = _to_excel_bytes({"Loan": compute_loan(df), "Poultry": compute_poultry(df), "Grants": compute_grants(df)})
-        return Response(content=data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": 'attachment; filename="pidim_reports.xlsx"'})
+        return Response(content=data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": 'attachment; filename=\"pidim_reports.xlsx\"'})
     except Exception as e:
         raise HTTPException(500, str(e))
 
