@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: pidim-smart-backend
+    env: python
+    plan: free
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    autoDeploy: true
+    rootDir: .
+  - type: cron
+    name: pidim-smart-refresh
+    schedule: "*/10 * * * *"
+    envVars:
+      - key: REFRESH_URL
+        value: https://pidim-smart-backend.onrender.com/tasks/refresh
+    command: |
+      curl -X POST "$REFRESH_URL" || true

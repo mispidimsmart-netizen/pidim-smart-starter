@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="/assets/favicon.png" />
+    <title>PIDIM SMART Dashboard</title>
+    <style>
+      body{ margin:0; font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;}
+      header{ position:sticky; top:0; z-index:5; background:#fff; border-bottom:1px solid #e5e7eb}
+      .wrap{ max-width:1200px; margin:0 auto; padding:16px }
+      .brand{ display:flex; align-items:center; gap:12px }
+      .brand h1{ margin:0; font-size:28px; color:#16a34a; font-weight:900}
+      .brand small{ display:block; color:#334155 }
+      #printBtn{ position:fixed; top:10px; right:12px; background:#16a34a; color:#fff; padding:8px 12px; border-radius:10px; border:0; cursor:pointer; font-weight:700}
+      #printBtn:before{ content:"🖨️ ";}
+      .credit{ margin-left:auto; text-align:right; font-size:12px; line-height:1.2 }
+      .grid{ display:grid; grid-template-columns: 1fr 1fr; gap:20px; }
+      h2{ font-size:20px; margin:16px 0 8px; color:#065f46 }
+      table{ width:100%; border-collapse: collapse; }
+      thead th{ background:#dcfce7; font-weight:800; text-align:left; padding:8px; border-bottom:1px solid #e5e7eb}
+      tbody td{ padding:8px; border-bottom:1px solid #f1f5f9}
+      tfoot td{ background:#dcfce7; font-weight:800; padding:8px }
+      @media print{ #printBtn{ display:none } header{ border:none } }
+    </style>
+  </head>
+  <body>
+    <button id="printBtn" onclick="window.print()">Print</button>
+    <header>
+      <div class="wrap brand">
+        <img src="/assets/logo.png" width="56" height="56" alt="PIDIM"/>
+        <div>
+          <h1>PIDIM Foundation</h1>
+          <small>Sustainable Microenterprise and Resilient Transformation (SMART) Project</small>
+        </div>
+        <div class="credit">
+          <b>Created by,</b><br/><b>Md. Moniruzzaman</b><br/>
+          MIS &amp; Documentation Officer<br/>SMART Project<br/>Pidim Foundation<br/>Cell: 01324 168100
+        </div>
+      </div>
+    </header>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
